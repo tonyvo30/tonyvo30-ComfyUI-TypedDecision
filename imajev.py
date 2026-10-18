@@ -212,7 +212,7 @@ class ImajevModel:
     max_videos = 0
     max_levels = 10
 
-    def __init__(self, backbone_path, folder, debias, calibrate):
+    def __init__(self, backbone_path, folder, debias, calibrate, model_options):
         self.debias = debias
         with open(os.path.join(folder, "adapter_config.json"), encoding="utf-8") as f:
             config = json.load(f)
@@ -227,7 +227,7 @@ class ImajevModel:
             raise ValueError("decision_readout.safetensors and decision_readout.json disagree on the number of codes.")
         self.calibration = self._load_calibration(folder) if calibrate else None
 
-        clip = comfy.sd.load_clip(ckpt_paths=[backbone_path])
+        clip = comfy.sd.load_clip(ckpt_paths=[backbone_path], model_options=model_options)
         mismatch = f"This adapter needs the Qwen3.5 backbone it was trained on (hidden size {self.readout.shape[1]})."
         if not isinstance(clip.cond_stage_model, comfy.text_encoders.qwen35.Qwen35TEModel):
             raise ValueError(mismatch)
@@ -293,7 +293,9 @@ class ImajevModel:
         budget = token_budget(self.clip.patcher, self.readout.shape[1])
         for batch in batches([media_layout(requests[r][0]) for r, *_ in rows], [length for *_, length in rows], budget):
             longest = max(len(rows[i][2]) for i in batch)
-            cond = self.clip.encode_from_tokens({self.name: [rows[i][2] + [(self.pad, 1.0)] * (longest - len(rows[i][2])) for i in batch]})
+            # Core loads the model (merging the LoRA into quantized weights) before entering its own device guard, which fails off the current GPU.
+            with comfy.model_management.cuda_device_context(self.clip.patcher.load_device):
+                cond = self.clip.encode_from_tokens({self.name: [rows[i][2] + [(self.pad, 1.0)] * (longest - len(rows[i][2])) for i in batch]})
             hidden = cond.reshape(len(batch), -1, self.readout.shape[1])
             last = hidden[range(len(batch)), [rows[i][3] - 1 for i in batch]].float()
             n = max(len(requests[rows[i][0]][2].answers) + 1 for i in batch)

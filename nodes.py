@@ -2,7 +2,10 @@ import json
 import os
 
 import folder_paths
+import torch
 from comfy_api.latest import io
+
+import comfy.model_management
 
 from . import clef, d3, imajev
 from .imajev import Question
@@ -105,6 +108,24 @@ def answer(model, question, decision, threshold, notes=None):
     return value, label, index, value >= threshold and not abstained, abstained, json.dumps({**result, **(notes or {})}, ensure_ascii=False)
 
 
+def device_options():
+    gpus = [d for d in comfy.model_management.get_all_torch_devices() if d.type == "cuda"]
+    return ["default", "cpu"] + [f"{d} ({torch.cuda.get_device_name(d)})" for d in gpus]
+
+
+def load_options(device):
+    """The device combo value -> model_options for comfy.sd.load_clip, like Core's CLIPLoader device input."""
+    if device == "default":
+        return {}
+    cpu = torch.device("cpu")
+    if device == "cpu":
+        return {"load_device": cpu, "offload_device": cpu}
+    name = device.split(" ", 1)[0]
+    if name not in [str(d) for d in comfy.model_management.get_all_torch_devices()]:
+        raise ValueError(f"device {name} is not available to this ComfyUI process; check CUDA_VISIBLE_DEVICES in the launcher.")
+    return {"load_device": torch.device(name), "offload_device": cpu}
+
+
 def decision_folders():
     return sorted({os.path.dirname(f) for f in folder_paths.get_filename_list("typed_decision") if os.path.basename(f) == imajev.MARKER} - {"d3", "clef"})
 
@@ -185,22 +206,25 @@ class LoadTypedDecisionModel(io.ComfyNode):
                 io.DynamicCombo.Input("adapter", options=adapter_options(),
                                       tooltip="imajev: the model folder in models/typed_decision, e.g. imajev-4b (the Hugging Face repository as downloaded). "
                                               "d3 / clef: pick d3 or clef; the backbone file carries the rest."),
+                io.Combo.Input("device", options=device_options(), default="default", advanced=True,
+                               tooltip="Where the model runs. default: ComfyUI's text-encoder device. Pick another GPU to keep VRAM free on the main one."),
             ],
             outputs=[TypedDecisionModel.Output(display_name="typed_decision_model")],
         )
 
     @classmethod
-    def execute(cls, backbone, adapter):
+    def execute(cls, backbone, adapter, device="default"):
         name = adapter["adapter"]
         backbone = folder_paths.get_full_path_or_raise("text_encoders", backbone)
+        model_options = load_options(device)
         if name == "d3":
-            return io.NodeOutput(d3.D3Model(backbone, adapter["debias"], adapter["fps"]))
+            return io.NodeOutput(d3.D3Model(backbone, adapter["debias"], model_options, adapter["fps"]))
         if name == "clef":
-            return io.NodeOutput(clef.ClefModel(backbone, adapter["fps"]))
+            return io.NodeOutput(clef.ClefModel(backbone, model_options, adapter["fps"]))
         folder = os.path.dirname(folder_paths.get_full_path_or_raise("typed_decision", os.path.join(name, imajev.MARKER)))
         if not imajev.is_imajev(folder):
             raise ValueError(f"{name}: unsupported typed decision model format (expected adapter_config.json, adapter_model.safetensors and decision_readout.*).")
-        return io.NodeOutput(imajev.ImajevModel(backbone, folder, adapter["debias"], adapter["calibration"]))
+        return io.NodeOutput(imajev.ImajevModel(backbone, folder, adapter["debias"], adapter["calibration"], model_options))
 
 
 class TypedDecision(io.ComfyNode):

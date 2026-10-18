@@ -192,12 +192,12 @@ class ClefModel:
     max_options = math.inf
     max_levels = math.inf
 
-    def __init__(self, backbone_path, fps=VIDEO_FPS):
+    def __init__(self, backbone_path, model_options, fps=VIDEO_FPS):
         self.fps = fps
         weights, config = read_head(backbone_path)
         head = JointSchemaHead(**config)
         head.load_state_dict(weights)
-        self.clip = comfy.sd.load_clip(ckpt_paths=[backbone_path])
+        self.clip = comfy.sd.load_clip(ckpt_paths=[backbone_path], model_options=model_options)
         if not isinstance(self.clip.cond_stage_model, comfy.text_encoders.qwen35.Qwen35TEModel):
             raise ValueError("The Clef backbone did not load as Qwen3.5.")
         self.name = self.clip.cond_stage_model.clip_name

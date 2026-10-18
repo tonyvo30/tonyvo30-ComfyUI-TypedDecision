@@ -22,8 +22,8 @@ from typed_decision import clef, d3, frames, imajev, moment, nodes
 from comfy_execution.graph_utils import ExecutionBlocker
 from typed_decision.imajev import (MAX_BATCH_TOKENS, ImajevModel, Question, batches, memory_estimation, token_budget, build_prompt, combine_rotations, downscale, grid_size, lora_to_comfy, prepare_image,
                     render, rotation_offsets, select, temperature, tokenize)
-from typed_decision.nodes import (LoadTypedDecisionModel, TypedDecision, answer, check_limits, parse_levels, parse_options, parse_state,
-                                  question_from_mode)
+from typed_decision.nodes import (LoadTypedDecisionModel, TypedDecision, answer, check_limits, device_options, load_options, parse_levels,
+                                  parse_options, parse_state, question_from_mode)
 
 UNKNOWN_LINE = "unknown — cannot be determined from the available evidence, the premise is false, or no listed option is correct"
 HEADER = ("Inspect the available evidence and answer the question using the stated criteria. "
@@ -880,3 +880,26 @@ def test_d3_reads_every_frame_of_a_clip_as_its_own_group():
     video, times = model.prepare_video(clip)
     assert times == [0.0, 0.5, 1.0]  # one group a frame: d3 barely sees the second frame of a pair
     assert video.shape[0] == 6 and (video[:, 0, 0, 0] * 255).round().tolist() == [0, 0, 1, 1, 2, 2]
+
+
+@pytest.fixture
+def two_gpus(monkeypatch):
+    monkeypatch.setattr(comfy.model_management, "get_all_torch_devices", lambda: [torch.device("cuda", 0), torch.device("cuda", 1)])
+    names = {0: "NVIDIA GeForce RTX 5090", 1: "NVIDIA GeForce RTX 4090"}
+    monkeypatch.setattr(torch.cuda, "get_device_name", lambda device: names[torch.device(device).index])
+
+
+def test_device_options_list_each_gpu_by_name(two_gpus):
+    assert device_options() == ["default", "cpu", "cuda:0 (NVIDIA GeForce RTX 5090)", "cuda:1 (NVIDIA GeForce RTX 4090)"]
+
+
+def test_load_options_for_each_device(two_gpus):
+    cpu = torch.device("cpu")
+    assert load_options("default") == {}
+    assert load_options("cpu") == {"load_device": cpu, "offload_device": cpu}
+    assert load_options("cuda:1 (NVIDIA GeForce RTX 4090)") == {"load_device": torch.device("cuda", 1), "offload_device": cpu}
+
+
+def test_load_options_reject_a_gpu_this_process_cannot_see(two_gpus):
+    with pytest.raises(ValueError, match="cuda:2 .* not available"):
+        load_options("cuda:2 (NVIDIA GeForce RTX 3090)")

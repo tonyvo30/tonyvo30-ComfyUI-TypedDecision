@@ -209,7 +209,7 @@ class D3Model:
     max_options = 255
     max_levels = 10
 
-    def __init__(self, backbone_path, debias, fps=VIDEO_FPS):
+    def __init__(self, backbone_path, debias, model_options, fps=VIDEO_FPS):
         self.debias = debias
         self.fps = fps
         self.readout, config = read_head(backbone_path)
@@ -218,7 +218,7 @@ class D3Model:
             raise ValueError(f"Unsupported d3 package: {config.get('format_id')!r} with {config.get('attention_mode')!r} attention.")
         self.temperature = config["temperature"]
 
-        self.clip = comfy.sd.load_clip(ckpt_paths=[backbone_path])
+        self.clip = comfy.sd.load_clip(ckpt_paths=[backbone_path], model_options=model_options)
         if not isinstance(self.clip.cond_stage_model, comfy.text_encoders.qwen35.Qwen35TEModel):
             raise ValueError("The d3 backbone did not load as Qwen3.5.")
         self.name = self.clip.cond_stage_model.clip_name

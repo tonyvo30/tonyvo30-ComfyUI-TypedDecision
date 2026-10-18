@@ -93,6 +93,8 @@ The `adapter` shows that model's settings.
 - `fps` (d3, Clef-flash): video frames read per second (default 2)
 - `calibration` (imajev): apply temperature calibration
 
+`device` (advanced) runs the model on another GPU or the CPU to keep VRAM free on the main GPU.
+
 ### Typed Decision
 
 Judges one question. Write questions and options in English.
